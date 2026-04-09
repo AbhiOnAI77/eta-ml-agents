@@ -14,12 +14,7 @@ from sklearn.preprocessing import StandardScaler, OrdinalEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.ensemble import RandomForestRegressor
-
-# Deep Learning
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
-from tensorflow.keras.callbacks import EarlyStopping
+from sklearn.neural_network import MLPRegressor
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -156,34 +151,23 @@ def prepare_data(df):
     return X, y
 
 def train_mlp_model(X_train, y_train, X_val, y_val, epochs=50, batch_size=32):
-    """Train Multi-Layer Perceptron model"""
-    mlp_model = keras.Sequential([
-        layers.Input(shape=(X_train.shape[1],)),
-        layers.Dense(64, activation='relu'),
-        layers.Dropout(0.2),
-        layers.Dense(32, activation='relu'),
-        layers.Dropout(0.2),
-        layers.Dense(1)
-    ])
-
-    mlp_model.compile(
-        optimizer='adam',
-        loss='mean_squared_error',
-        metrics=['mae']
-    )
-
-    early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-
-    history = mlp_model.fit(
-        X_train, y_train,
-        validation_data=(X_val, y_val),
-        epochs=epochs,
+    """Train Multi-Layer Perceptron model using scikit-learn"""
+    mlp_model = MLPRegressor(
+        hidden_layer_sizes=(64, 32),
+        activation='relu',
+        solver='adam',
+        max_iter=epochs,
         batch_size=batch_size,
-        verbose=0,
-        callbacks=[early_stop]
+        early_stopping=True,
+        validation_fraction=0.15,
+        n_iter_no_change=5,
+        random_state=42,
+        verbose=False
     )
 
-    return mlp_model, history
+    mlp_model.fit(X_train, y_train)
+
+    return mlp_model
 
 # Main application logic
 if 'data_generated' not in st.session_state:
@@ -357,20 +341,19 @@ if run_training or st.session_state.data_generated:
             with col2:
                 st.info("🧠 Training MLP Neural Network...")
                 # MLP
-                mlp_model, history = train_mlp_model(
+                mlp_model = train_mlp_model(
                     X_train_processed, y_train,
                     X_val_processed, y_val,
                     epochs=mlp_epochs,
                     batch_size=batch_size
                 )
 
-                mlp_pred = mlp_model.predict(X_test_processed).flatten()
+                mlp_pred = mlp_model.predict(X_test_processed)
                 mlp_mae = mean_absolute_error(y_test, mlp_pred)
                 mlp_rmse = np.sqrt(mean_squared_error(y_test, mlp_pred))
                 mlp_r2 = r2_score(y_test, mlp_pred)
 
                 st.session_state.mlp_model = mlp_model
-                st.session_state.mlp_history = history
                 st.session_state.mlp_metrics = {'MAE': mlp_mae, 'RMSE': mlp_rmse, 'R²': mlp_r2}
                 st.session_state.mlp_pred = mlp_pred
 
@@ -465,21 +448,23 @@ if run_training or st.session_state.data_generated:
                 st.plotly_chart(fig, use_container_width=True)
 
             # Training history for MLP
-            if 'mlp_history' in st.session_state:
+            if 'mlp_model' in st.session_state and hasattr(st.session_state.mlp_model, 'loss_curve_'):
                 st.markdown("### MLP Training History")
-                history = st.session_state.mlp_history.history
+                loss_curve = st.session_state.mlp_model.loss_curve_
 
-                fig = make_subplots(rows=1, cols=2, subplot_titles=['Loss', 'MAE'])
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(y=loss_curve, name='Training Loss', line=dict(color='#FF6B6B')))
 
-                fig.add_trace(go.Scatter(y=history['loss'], name='Train Loss', line=dict(color='#FF6B6B')), row=1, col=1)
-                fig.add_trace(go.Scatter(y=history['val_loss'], name='Val Loss', line=dict(color='#4ECDC4')), row=1, col=1)
+                if hasattr(st.session_state.mlp_model, 'validation_scores_'):
+                    val_scores = st.session_state.mlp_model.validation_scores_
+                    fig.add_trace(go.Scatter(y=val_scores, name='Validation Score (R²)', line=dict(color='#4ECDC4')))
 
-                fig.add_trace(go.Scatter(y=history['mae'], name='Train MAE', line=dict(color='#FF6B6B')), row=1, col=2)
-                fig.add_trace(go.Scatter(y=history['val_mae'], name='Val MAE', line=dict(color='#4ECDC4')), row=1, col=2)
-
-                fig.update_xaxes(title_text="Epoch", row=1, col=1)
-                fig.update_xaxes(title_text="Epoch", row=1, col=2)
-                fig.update_layout(height=400)
+                fig.update_layout(
+                    title='MLP Training Convergence',
+                    xaxis_title='Iteration',
+                    yaxis_title='Value',
+                    height=400
+                )
 
                 st.plotly_chart(fig, use_container_width=True)
         else:
@@ -557,7 +542,7 @@ if run_training or st.session_state.data_generated:
 
                 # Predict
                 rf_prediction = st.session_state.rf_model.predict(input_processed)[0]
-                mlp_prediction = st.session_state.mlp_model.predict(input_processed).flatten()[0]
+                mlp_prediction = st.session_state.mlp_model.predict(input_processed)[0]
 
                 # Display predictions
                 st.markdown("---")
