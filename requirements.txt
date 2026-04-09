@@ -2,6 +2,6 @@ streamlit
 pandas
 numpy<2.0.0
 scikit-learn
-tensorflow
+tensorflow-cpu
 plotly
 geopy
